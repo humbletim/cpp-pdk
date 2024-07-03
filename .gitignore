@@ -1,3 +1,0 @@
-*.wasm
-*.o
-wasi-sdk
