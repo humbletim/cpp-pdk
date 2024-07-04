@@ -8,7 +8,8 @@ dummy:
 emsdk/README.md:
 	git clone https://github.com/emscripten-core/emsdk.git
 emsdk/upstream/emscripten/em++: emsdk/README.md
-	cd emsdk && EMSDK_KEEP_DOWNLOADS=1 ./emsdk install latest
+	./emsdk/emsdk install latest
+	./emsdk/emsdk activate latest
 
 EMSDK ?= ./emsdk
 emsdk_clang = $(EMSDK)/upstream/emscripten/em++
@@ -35,7 +36,7 @@ emsdk_cxx = $(EMSDK)/upstream/emscripten/em++ $(emsdk_flags) $(emsdk_ldflags)
 #################################################################
 # vanilla clang/llvm -- note: update clang++ version used below
 #################################################################
-llvm_clang := clang++-18
+llvm_clang := clang++
 ### llvm_flags = -target wasm32-unknown-unknown
 llvm_flags = -target wasm32-wasi
 llvm_flags += -Dusing_llvm_clang_toolchain

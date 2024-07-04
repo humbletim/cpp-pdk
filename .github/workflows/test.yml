@@ -11,8 +11,24 @@ jobs:
   test-build:
     runs-on: ubuntu-latest
     steps:
-    - name: Output Inputs
-      shell: bash
+    - name: clone
+      run: cd .. && git clone --quiet --filter=tree:0 --single-branch https://github.com/humbletim/cpp-pdk
+    - name: fetch sdks
+      run: make fetch-linux-sdks
+    - name: all
+      run: make all
+    - name: test
+      run: make test
+    - name: report
       run: |
-        make fetch-linux-sdks
-        make test
+          cat <<EOF | tee $GITHUB_STEP_SUMMARY
+          | name           | value           |
+          | ---------      | -----------     |
+          | ---------      | -----------     |
+          EOF
+    - name: ~Setup tmate session
+      if: failure()
+      uses: mxschmitt/action-tmate@v3
+      with:
+        limit-access-to-actor: true
+
