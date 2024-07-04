@@ -20,12 +20,7 @@ jobs:
     - name: test
       run: make test
     - name: report
-      run: |
-          cat <<EOF | tee $GITHUB_STEP_SUMMARY
-          | name           | value           |
-          | ---------      | -----------     |
-          | ---------      | -----------     |
-          EOF
+      run: make report 2>&1 | tee $GITHUB_STEP_SUMMARY
     - name: ~Setup tmate session
       if: failure()
       uses: mxschmitt/action-tmate@v3

@@ -143,3 +143,13 @@ test: $(ALL)
 test-wasi: $(ALL)
 	for x in $^ ; do echo "--------"; ls -l $$x ; ./extism call --wasi $$x hello --input 0123456789ab0123456789ab0123456 --log-level info ; echo "" ; done
 
+report: $(ALL)
+	@echo "| name           | value           |"
+	@echo "| ---------      | -----------     |"
+	@for x in $^ ; do \
+	echo "| $$x | \`\`\`" ; \
+	sh -c "$(EMSDK)/upstream/bin/wasm-dis $$x | $(dis-filtered) ; ls -l $$x ; ./extism call $$x hello --config foo=bar --config user=make --input 0123456789ab0123456789ab0123456 --log-level info | grep -E 'TOOLCHAIN|error|glm_vec3_test' " 2>&1 | c++filt -t ; \
+	echo "\`\`\` |" ; \
+	done
+	@echo "| ---------      | -----------     |"
+
