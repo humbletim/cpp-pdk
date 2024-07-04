@@ -49,7 +49,7 @@ llvm_cxx = $(llvm_clang) $(llvm_flags) $(llvm_ldflags)
 # wasi-sdk -- note: update WASK_SDK_PATH below
 #################################################################
 wasi-sdk-22.0/VERSION:
-	wget -c https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-22/wasi-sdk-22.0-linux.tar.gz
+	wget -nv -c https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-22/wasi-sdk-22.0-linux.tar.gz
 	tar xf wasi-sdk-22.0-linux.tar.gz
 
 WASI_SDK_PATH ?= wasi-sdk-22.0
@@ -72,18 +72,20 @@ LDFLAGS += -Wl,--no-entry            # prevent clang _start/main assumptions
 #################################################################
 
 extism: 
-	wget -c https://github.com/extism/cli/releases/download/v1.5.2/extism-v1.5.2-linux-amd64.tar.gz
+	wget -nv -c https://github.com/extism/cli/releases/download/v1.5.2/extism-v1.5.2-linux-amd64.tar.gz
 	tar xf extism-v1.5.2-linux-amd64.tar.gz extism
 include/extism.h: extism
 	./extism lib install --prefix=.
 include/extism-pdk.h:
-	wget -c https://github.com/extism/c-pdk/archive/refs/tags/v1.0.1.zip
-	unzip -d include -j v1.0.1.zip c-pdk-1.0.1/extism-pdk.h
+	cp -av wip/extism-pdk.h $@
+#	wget -nv -c https://github.com/extism/c-pdk/archive/refs/tags/v1.0.1.zip
+#	unzip -q -d include -j v1.0.1.zip c-pdk-1.0.1/extism-pdk.h
+
 
 include/glm/glm.hpp:
 	mkdir -p include || true
-	wget -c https://github.com/g-truc/glm/releases/download/1.0.1/glm-1.0.1-light.zip
-	unzip -d include glm-1.0.1-light.zip
+	wget -nv -c https://github.com/g-truc/glm/releases/download/1.0.1/glm-1.0.1-light.zip
+	unzip -q -d include glm-1.0.1-light.zip
 
 #################################################################
 DEPS =
@@ -103,7 +105,7 @@ fetch-linux-sdks: $(DEPS)
 CFLAGS += -DXX_USE_LIBCPP_ONLY  # use WASI polyfills but no runtime dependencies
 
 CFLAGS += -O1
-CFLAGS += -I. -Iglm
+CFLAGS += -I. -Iinclude -Iwip
 
 LDFLAGS += -Wl,--export=hello
 LDFLAGS += -Wl,--export=glm_vec3_test
@@ -113,19 +115,22 @@ dis-filtered = grep -E '[(](export|import)' | grep -v extism:
 emscripten-plugin.wasm: plugin.cpp
 	$(emsdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
 	ls -l $@
-	wasm-dis $@ | $(dis-filtered)
+	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
 
 wasi-sdk-plugin.wasm: plugin.cpp
 	$(wasi_sdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
 	ls -l $@
-	wasm-dis $@ | $(dis-filtered)
+	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
 
 llvm-clang-plugin.wasm: plugin.cpp
 	$(llvm_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
 	ls -l $@
-	wasm-dis $@ | $(dis-filtered)
+	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
 
-ALL = wasi-sdk-plugin.wasm emscripten-plugin.wasm llvm-clang-plugin.wasm
+ALL =
+ALL += wasi-sdk-plugin.wasm
+ALL += emscripten-plugin.wasm
+# ALL += llvm-clang-plugin.wasm # broken on stock clang/gha ubuntu runners
 
 all: $(ALL)
 	ls -l *.wasm

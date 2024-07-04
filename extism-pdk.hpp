@@ -31,7 +31,7 @@ extern "C" void abort();
 // ------------------------
 // include underlying C-PDK
 // ------------------------
-#include "wip/extism-pdk.h"
+#include "extism-pdk.h"
 
 // ------------------------
 void wasi_log_unavailability(const char* msg) { extism_log_sz(msg, ExtismLogError); }
