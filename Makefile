@@ -1,4 +1,7 @@
 # experimental "cpp-pdk" stuff -- humbletim 2024.07.02
+
+SHELL := bash
+
 dummy:
 	echo hi
 
@@ -15,20 +18,9 @@ EMSDK ?= ./emsdk
 emsdk_clang = $(EMSDK)/upstream/emscripten/em++
 emsdk_flags = -Dusing_emscripten_toolchain
 emsdk_flags += "-D__xx_toolchain__=\"$$($(emsdk_clang) --version|head -1)\""
+emsdk_flags += -sMALLOC=emmalloc
+emsdk_ldflags =
 emsdk_ldflags += -sSTANDALONE_WASM=1
-emsdk_ldflags += -lemmalloc           # for malloc/free
-emsdk_ldflags += -lcompiler_rt        # for string-related libc features 
-
-### NOTE: adding below flags seems to have become optional-ish with
-###  regards to latest emscripten SDKs; however, fewer accidental
-###  exports seem to emerge if enabling some of these
-# emsdk_ldflags += -sSUPPORT_ERRNO=0
-# emsdk_ldflags += -sSUPPORT_LONGJMP=0
-# emsdk_ldflags += -sALLOW_MEMORY_GROWTH=0
-# emsdk_ldflags += -sWASMFS=0
-# emsdk_ldflags += -sNO_FILESYSTEM=1
-# emsdk_ldflags += -sERROR_ON_UNDEFINED_SYMBOLS=0
-# emsdk_ldflags += -sWARN_ON_UNDEFINED_SYMBOLS=0
 
 emsdk_cxx = $(EMSDK)/upstream/emscripten/em++ $(emsdk_flags) $(emsdk_ldflags)
 
@@ -63,6 +55,7 @@ wasi_sdk_cxx = $(wasi_sdk_clang) $(wasi_sdk_flags) $(wasi_sdk_ldflags)
 # ... common flags ...
 CFLAGS =
 #CFLAGS += -Oz
+#CFLAGS += -fcolor-diagnostics
 CFLAGS += -fno-exceptions            # no try/catch support yet, sorry
 LDFLAGS =
 LDFLAGS += -nostartfiles             # prevent clang crt startup routines
@@ -74,8 +67,13 @@ LDFLAGS += -Wl,--no-entry            # prevent clang _start/main assumptions
 extism: 
 	wget -nv -c https://github.com/extism/cli/releases/download/v1.5.2/extism-v1.5.2-linux-amd64.tar.gz
 	tar xf extism-v1.5.2-linux-amd64.tar.gz extism
-include/extism.h: extism
-	./extism lib install --prefix=.
+extism-sdk = ./extism-sdk
+extism-sdk/include/extism.h: extism
+	./extism lib install --prefix=extism-sdk
+include/extism.h: extism-sdk/include/extism.h
+	cp -av $< $@
+
+# for now use a local C++ compatible version of extism c-pdk header
 include/extism-pdk.h:
 	cp -av wip/extism-pdk.h $@
 #	wget -nv -c https://github.com/extism/c-pdk/archive/refs/tags/v1.0.1.zip
@@ -89,12 +87,18 @@ include/glm/glm.hpp:
 
 #################################################################
 DEPS =
+
+# COMMON
+DEPS += include/glm/glm.hpp
+
+# PDK
 DEPS += include/extism.h
 DEPS += include/extism-pdk.h
+
+# TOOLCHAINS
 DEPS += emsdk/upstream/emscripten/em++
 DEPS += wasi-sdk-22.0/VERSION
 DEPS += emsdk/README.md
-DEPS += include/glm/glm.hpp
 
 fetch-linux-sdks: $(DEPS)
 	@$(wasi_sdk_cxx) --version | head -1
@@ -103,29 +107,29 @@ fetch-linux-sdks: $(DEPS)
 	ls -l $^
 
 CFLAGS += -DXX_USE_LIBCPP_ONLY  # use WASI polyfills but no runtime dependencies
-
 CFLAGS += -O3
-CFLAGS += -I. -Iinclude -Iwip
+CFLAGS += -Iinclude -Iwip
 
-LDFLAGS += -Wl,--export=hello
-LDFLAGS += -Wl,--export=glm_vec3_test
+LDFLAGS += -Wl,--export-if-defined=hello
 
+wasm-dis = $(EMSDK)/upstream/bin/wasm-dis
 dis-filtered = grep -E '[(](export|import)' | grep -v extism:
 
 emscripten-plugin.wasm: plugin.cpp
-	$(emsdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
+	cd $(EMSDK) && . ./emsdk_env.sh
+	$(emsdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS) 2>&1
 	ls -l $@
-	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
+	$(wasm-dis) $@ | $(dis-filtered)
 
 wasi-sdk-plugin.wasm: plugin.cpp
-	$(wasi_sdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
+	$(wasi_sdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS) 2>&1
 	ls -l $@
-	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
+	$(wasm-dis) $@ | $(dis-filtered)
 
 llvm-clang-plugin.wasm: plugin.cpp
-	$(llvm_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
+	$(llvm_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS) 2>&1
 	ls -l $@
-	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
+	$(wasm-dis) $@ | $(dis-filtered)
 
 ALL =
 ALL += wasi-sdk-plugin.wasm

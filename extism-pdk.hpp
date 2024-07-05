@@ -22,7 +22,7 @@ extern "C" void abort();
   #endif
 #endif
 
-// make __xx_toolchain__ available as string a literal __toolchain__
+// make __xx_toolchain__ available as a string literal __toolchain__
 #define xx_stringize___(s) #s
 #define xx_stringize__(s) xx_stringize___(s)
 #define __toolchain__ xx_stringize__(__xx_toolchain__)
@@ -33,10 +33,27 @@ extern "C" void abort();
 // ------------------------
 #include "extism-pdk.h"
 
+#define va_forward_ap(var, ...)   \
+  __builtin_va_list ap;           \
+  __builtin_va_start(ap, var);    \
+  __VA_ARGS__;                    \
+  __builtin_va_end(ap);
+
+#define va_format_zeroalloc(tmpbuffer, fmt) \
+  { tmpbuffer[0] = 0; va_forward_ap(fmt, vsnprintf(tmpbuffer, sizeof(tmpbuffer)-1, fmt, ap)); }
+
+// pure c++11 direct char[] appender
+template <typename T> inline char* append(T&& buf, const char *src) {
+  auto total = sizeof(T);
+  char* dest = buf;
+  while (total-- && *dest) dest++;
+  while (total-- && *src) *dest++ = *src++;
+  *dest = '\0';
+  return dest;
+};
+
 // ------------------------
 void wasi_log_unavailability(const char* msg) { extism_log_sz(msg, ExtismLogError); }
-
-
 
 #include <string>
 
@@ -54,7 +71,6 @@ struct HostedPlugin {
     template <typename T = String> T get(const char* key) { return T{ extism_var_get_buf_from_sz(key) }; }
     template <typename T = String> T operator()(const char* key) { return T{ extism_var_get_buf_from_sz(key) }; }
     template <typename T> void set(const char* key, T const& value ) { extism_var_set_buf_from_sz(key, value); }
-    
   } var;
   String config(const char* key) { return String{ extism_config_get_buf_from_sz(key) }; }
 
@@ -63,6 +79,10 @@ struct HostedPlugin {
     template <typename T> bool load(T& t) const {
       //assert(sizeof(T) == extism_input_length());
       return extism_load_input(0, &t, sizeof(T));
+    }
+    bool load(String& s) const {
+      s.resize(length);
+      return extism_load_input(0, s.data(), s.size());
     }
     template <typename T> T const& get() const {
       static T t;
@@ -76,6 +96,9 @@ struct HostedPlugin {
       //assert(sizeof(T) == sz);
       extism_output_buf((uint8_t*)&t, sz);
   }
+  constexpr void output(String const& s) const {
+    extism_output_buf((uint8_t*)s.data(), s.size());
+  }
   void formatOutput(const char* fmt, ...);
 
   struct Error {
@@ -83,15 +106,15 @@ struct HostedPlugin {
   } error;
 
   struct Console {
-    void __log(ExtismLog level, const char* fmt, __builtin_va_list ap);
-    void _log(ExtismLog level, const char* fmt, ...) { __builtin_va_list ap; __builtin_va_start(ap, fmt); __log(level, fmt, ap); __builtin_va_end(ap); }
-    template<typename ...Args> constexpr void info(const char* fmt, Args ...args) { _log(ExtismLogInfo, fmt, args...); }
-    template<typename ...Args> constexpr void debug(const char* fmt, Args ...args) { _log(ExtismLogDebug, fmt, args...); }
-    template<typename ...Args> constexpr void warn(const char* fmt, Args ...args) { _log(ExtismLogWarn, fmt, args...); }
-    template<typename ...Args> constexpr void error(const char* fmt, Args ...args) { _log(ExtismLogError, fmt, args...); }
-    template<typename ...Args> constexpr void log(const char* fmt, Args ...args) { _log(ExtismLogDebug, fmt, args...); }
+    static void _log  (ExtismLog level, const char* fmt, __builtin_va_list ap);
+    static void info  (const char* fmt, ...) { va_forward_ap(fmt, _log(ExtismLogInfo , fmt, ap) ); }
+    static void debug (const char* fmt, ...) { va_forward_ap(fmt, _log(ExtismLogDebug, fmt, ap) ); }
+    static void warn  (const char* fmt, ...) { va_forward_ap(fmt, _log(ExtismLogWarn , fmt, ap) ); }
+    static void error (const char* fmt, ...) { va_forward_ap(fmt, _log(ExtismLogError, fmt, ap) ); }
+    static void log   (const char* fmt, ...) { va_forward_ap(fmt, _log(ExtismLogDebug, fmt, ap) ); }
   } console;
 
+  static char tmpbuffer[1024];
 };
 
 extern HostedPlugin self;
@@ -106,60 +129,54 @@ namespace nowasi {
 // ----------------------------------------------------------------------------
 
 HostedPlugin self;
+char HostedPlugin::tmpbuffer[1024];
 
-#include <stdarg.h> // for va_list, va_start, etc.
 #include <stdio.h>  // for vsnprintf, stderr
 #include <string>
 
-#define __fmt_from_ap(outBuf, ap) vsnprintf(outBuf, sizeof(outBuf)-1, fmt, ap);
-
 void HostedPlugin::Error::format(const char* fmt, ...) {
-  char outBuf[1024]{0}; va_list ap; va_start(ap, fmt); int sz = __fmt_from_ap(outBuf, ap); va_end(ap);
-  extism_error_set_buf_from_sz(outBuf);
+  va_format_zeroalloc(HostedPlugin::tmpbuffer, fmt);
+  extism_error_set_buf_from_sz(HostedPlugin::tmpbuffer);
 }
 
 void HostedPlugin::formatOutput(const char* fmt, ...) {
-  char outBuf[1024]{0}; va_list ap; va_start(ap, fmt); int sz = __fmt_from_ap(outBuf, ap); va_end(ap);
-  extism_output_buf(outBuf, sz);
+  va_format_zeroalloc(HostedPlugin::tmpbuffer, fmt);
+  extism_output_buf_from_sz(HostedPlugin::tmpbuffer);
 }
 
-void HostedPlugin::Console::__log(ExtismLog level, const char* fmt, __builtin_va_list ap) {
-  char outBuf[1024]={0};
-  __fmt_from_ap(outBuf, ap);
-  static auto const& strncat = [](char *dest, const char *src, size_t n) -> char* {
-    char *p = dest; while (*dest) dest++;
-    while (n-- && *src) *dest++ = *src++;
-    *dest = '\0'; return p;
-  };
-  char buf[2048]{0};
-  {switch(level) {
-    case ExtismLogInfo: strncat(buf, "[info] ", sizeof(buf)); break;
-    case ExtismLogDebug: strncat(buf, "[debug] ", sizeof(buf)); break;
-    case ExtismLogWarn: strncat(buf, "[warn] ", sizeof(buf)); break;
-    case ExtismLogError: strncat(buf, "[error] ", sizeof(buf)); break;
-    default: strncat(buf, "[unknown] ", sizeof(buf)); break;
-    }};
-  strncat(buf, outBuf, sizeof(buf));
-  extism_log_sz(buf, level);
+void HostedPlugin::Console::_log(ExtismLog level, const char* fmt, __builtin_va_list ap) {
+  static constexpr auto prefix = [](ExtismLog level) { switch(level) {
+    case ExtismLogInfo : return "[pdk-info]   ";
+    case ExtismLogDebug: return "[pdk-debug]  ";
+    case ExtismLogWarn : return "[pdk-warn]   ";
+    case ExtismLogError: return "[pdk-error]  ";
+                default: return "[pdk-unknown]";
+  }};
+  static char formatted[1024];
+  {
+    formatted[0] = 0;
+    vsnprintf(formatted, sizeof(formatted)-1, fmt, ap);
+    char buf[1024]{""};
+    append(buf, prefix(level));
+    append(buf, formatted);
+    extism_log_sz(buf, level);
+  }
 }
 
 namespace nowasi {
   inline int fprintf(void* s, const char* fmt, ...) {
-    char outBuf[1024]{0}; va_list ap; va_start(ap, fmt); int sz = __fmt_from_ap(outBuf, ap); va_end(ap);
-    extism_log_sz(outBuf, s == stdout ? ExtismLogDebug : (s == stderr ? ExtismLogInfo : ExtismLogWarn));
+    va_format_zeroalloc(HostedPlugin::tmpbuffer, fmt);
+    extism_log_sz(HostedPlugin::tmpbuffer, s == stdout ? ExtismLogDebug : (s == stderr ? ExtismLogInfo : ExtismLogWarn));
     return 0;
   }
   inline int printf(const char* fmt, ...) {
-    char outBuf[1024]{0}; va_list ap; va_start(ap, fmt); int sz = __fmt_from_ap(outBuf, ap); va_end(ap);
-    extism_log_sz(outBuf, ExtismLogDebug);
+    va_format_zeroalloc(HostedPlugin::tmpbuffer, fmt);
+    extism_log_sz(HostedPlugin::tmpbuffer, ExtismLogDebug);
     return 0;
   }
 } // ns
 
 //using namespace nowasi;  
-
-#undef __fmt_from_va
-#undef __fmt_from_ap
 
 #ifdef XX_USE_LIBCPP_ONLY
   #define fprintf nowasi::fprintf

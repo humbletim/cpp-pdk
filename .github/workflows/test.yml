@@ -22,7 +22,7 @@ jobs:
     - name: report
       run: make report 2>&1 | tee $GITHUB_STEP_SUMMARY
     - name: ~Setup tmate session
-      if: failure()
+      if: failure() && inputs.test == 'maybe'
       uses: mxschmitt/action-tmate@v3
       with:
         limit-access-to-actor: true
