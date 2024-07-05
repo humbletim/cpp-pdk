@@ -16,7 +16,11 @@ emsdk_clang = $(EMSDK)/upstream/emscripten/em++
 emsdk_flags = -Dusing_emscripten_toolchain
 emsdk_flags += "-D__xx_toolchain__=\"$$($(emsdk_clang) --version|head -1)\""
 emsdk_ldflags += -sSTANDALONE_WASM=1
-emsdk_ldflags += -lemmalloc           # for malloc/free
+emsdk_flags += -sMALLOC=emmalloc
+#emsdk_ldflags += -sALLOW_MEMORY_GROWTH=1
+#emsdk_ldflags += -sGLOBAL_BASE=64kb
+#emsdk_ldflags += -sHEAP_BASE=64kb
+###emsdk_ldflags += -lemmalloc           # for malloc/free
 emsdk_ldflags += -lcompiler_rt        # for string-related libc features 
 
 ### NOTE: adding below flags seems to have become optional-ish with
@@ -63,6 +67,7 @@ wasi_sdk_cxx = $(wasi_sdk_clang) $(wasi_sdk_flags) $(wasi_sdk_ldflags)
 # ... common flags ...
 CFLAGS =
 #CFLAGS += -Oz
+CFLAGS += -fcolor-diagnostics
 CFLAGS += -fno-exceptions            # no try/catch support yet, sorry
 LDFLAGS =
 LDFLAGS += -nostartfiles             # prevent clang crt startup routines
@@ -108,22 +113,27 @@ CFLAGS += -O3
 CFLAGS += -I. -Iinclude -Iwip
 
 LDFLAGS += -Wl,--export=hello
-LDFLAGS += -Wl,--export=glm_vec3_test
+LDFLAGS += -Wl,--export-if-defined=glm_vec3_test
+LDFLAGS += -Wl,--export-if-defined=addressof_uniforms
+LDFLAGS += -Wl,--export-if-defined=sizeof_uniforms
+LDFLAGS += -Wl,--export-if-defined=addressof_attributes
+LDFLAGS += -Wl,--export-if-defined=sizeof_attributes
 
 dis-filtered = grep -E '[(](export|import)' | grep -v extism:
 
 emscripten-plugin.wasm: plugin.cpp
-	$(emsdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
+	cd $(EMSDK) && . ./emsdk_env.sh
+	$(emsdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS) 2>&1
 	ls -l $@
 	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
 
 wasi-sdk-plugin.wasm: plugin.cpp
-	$(wasi_sdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
+	$(wasi_sdk_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS) 2>&1
 	ls -l $@
 	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
 
 llvm-clang-plugin.wasm: plugin.cpp
-	$(llvm_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS)
+	$(llvm_cxx) $(CFLAGS) $(LDFLAGS) $< -o $@ $(EXPORTS) 2>&1
 	ls -l $@
 	$(EMSDK)/upstream/bin/wasm-dis $@ | $(dis-filtered)
 
@@ -150,4 +160,14 @@ report: $(ALL)
         echo '```' ; ./extism call $$x hello --config foo=bar --config user=make --input 0123456789ab0123456789ab0123456 --log-level info | grep -E 'TOOLCHAIN|error|glm_vec3_test' 2>&1 | c++filt -t ; echo '```' ; \
 	echo '' ;  \
 	done
+
+
+cpp-sdk := ../../cpp-sdk
+extism-sdk := ../../lib
+SHELL := bash
+cpp-sdk.o: $(cpp-sdk)/src/*.cpp $(cpp-sdk)/jsoncpp/dist/jsoncpp.cpp
+	clang++-18 -O0  -I $(cpp-sdk)/src  -I $(extism-sdk)/include -I $(cpp-sdk)/jsoncpp/dist -x c++ <( cat $^ ) -g -fPIC -c -o $@
+host: host.cpp cpp-sdk.o
+	clang++-18 -O0 -g -I $(cpp-sdk)/src  -I $(extism-sdk)/include -L $(extism-sdk)/lib -lextism -I $(cpp-sdk)/jsoncpp/dist \
+	 $< -o $@ -Wl,-rpath,'$$ORIGIN/../../lib/lib' cpp-sdk.o
 

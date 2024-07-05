@@ -6,6 +6,12 @@ on:
         test:
           type: string
           required: true
+      inputs:
+        test:
+          type: string
+          required: true
+
+run-name: test-${{inputs.test}}
 
 jobs:
   test-build:
